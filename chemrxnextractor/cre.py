@@ -123,7 +123,7 @@ class RxnExtractor(object):
         for guid, sent in enumerate(sents):
             # assume sents are not tokenized,
             # todo: replace with better tokenizers
-            words = sent.split()  # No argument = split on any whitespace, ignore empties
+            words = sent.split()
             labels = ["O"] * len(words)
             examples.append(InputExample(
                 guid=guid,
