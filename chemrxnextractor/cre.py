@@ -184,7 +184,26 @@ class RxnExtractor(object):
         examples = []
         num_rxns_per_sent = []
         for guid, (sent, prod_labels) in enumerate(zip(tokenized_sents, products)):
-            assert len(sent) == len(prod_labels)
+            # Handle tokenization mismatch (caused by sequence truncation at max_seq_length)
+            if len(sent) != len(prod_labels):
+                import logging
+                logger = logging.getLogger(__name__)
+
+                # Get original sentence for debugging
+                original_text = sents[guid] if guid < len(sents) else " ".join(sent)
+                preview = (original_text[:200] + "...") if len(original_text) > 200 else original_text
+
+                logger.warning(
+                    f"\n{'='*60}\n"
+                    f"SKIPPED SENTENCE {guid}:\n"
+                    f"  Token count: {len(sent)}\n"
+                    f"  Label count: {len(prod_labels)}\n"
+                    f"  Preview: '{preview}'\n"
+                    f"{'='*60}"
+                )
+                num_rxns_per_sent.append(0)
+                continue
+
             prods = get_entities(prod_labels)
             num_rxns_per_sent.append(len(prods))
             for i, (etype, ss, se) in enumerate(prods):
@@ -266,4 +285,3 @@ class RxnExtractor(object):
             results.append(rxns)
 
         return results
-

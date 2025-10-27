@@ -316,7 +316,13 @@ class BertCRFForRoleLabeling(BertForTokenClassification):
         # concatenate sequence_output with Product token output
         sequence_output = torch.cat([sequence_output, extended_prod_h], 2)
         if self.use_cls:
-            extended_cls_h = outputs[1].unsqueeze(1).expand(batch_size, seq_length, hidden_dim)
+            # Safe access to pooler output (may not exist in some model configs)
+            if len(outputs) > 1 and outputs[1] is not None:
+                extended_cls_h = outputs[1].unsqueeze(1).expand(batch_size, seq_length, hidden_dim)
+            else:
+                # Fallback: use CLS token from ORIGINAL outputs[0] (before concatenation)
+                cls_h = outputs[0][:, 0, :]  # Extract from original sequence output
+                extended_cls_h = cls_h.unsqueeze(1).expand(batch_size, seq_length, hidden_dim)
             sequence_output = torch.cat([sequence_output, extended_cls_h], 2)
         sequence_output = self.dropout(sequence_output)
         logits = self.classifier(sequence_output)
@@ -336,4 +342,3 @@ class BertCRFForRoleLabeling(BertForTokenClassification):
         viterbi_tags = [x for x, y in viterbi_path]
 
         return viterbi_tags
-
