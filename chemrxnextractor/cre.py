@@ -49,6 +49,9 @@ class RxnExtractor(object):
             else "cpu"
         )
 
+        # Track skipped sentences across all extractions
+        self.skipped_sentences = []
+
         self.load_model()
 
     def load_model(self):
@@ -174,6 +177,9 @@ class RxnExtractor(object):
     def get_reactions(self, sents, products=None):
         """
         """
+        # Clear skipped sentences from previous extraction
+        self.skipped_sentences = []
+
         if products is None:
             tokenized_sents, products = self.get_products(sents)
 
@@ -190,23 +196,21 @@ class RxnExtractor(object):
         for guid, (sent, prod_labels) in enumerate(zip(tokenized_sents, products)):
             # Handle tokenization mismatch (caused by sequence truncation at max_seq_length)
             if len(sent) != len(prod_labels):
-                import logging
-                logger = logging.getLogger(__name__)
-
                 skipped_count += 1  # Increment skip counter
 
                 # Get original sentence for debugging
                 original_text = sents[guid] if guid < len(sents) else " ".join(sent)
                 preview = (original_text[:200] + "...") if len(original_text) > 200 else original_text
 
-                logger.warning(
-                    f"\n{'='*60}\n"
-                    f"SKIPPED SENTENCE {guid} ({skipped_count}/{total_sentences}):\n"
-                    f"  Token count: {len(sent)}\n"
-                    f"  Label count: {len(prod_labels)}\n"
-                    f"  Preview: '{preview}'\n"
-                    f"{'='*60}"
-                )
+                # Collect skipped sentence info instead of logging
+                self.skipped_sentences.append({
+                    'sentence_id': guid,
+                    'token_count': len(sent),
+                    'label_count': len(prod_labels),
+                    'preview': preview,
+                    'full_text': original_text
+                })
+
                 num_rxns_per_sent.append(0)
                 continue
 
@@ -290,19 +294,7 @@ class RxnExtractor(object):
 
             results.append(rxns)
 
-        # Log sentence processing statistics
-        if skipped_count > 0:
-            import logging
-            logger = logging.getLogger(__name__)
-            skip_percentage = (skipped_count / total_sentences) * 100
-            logger.warning(
-                f"\n{'='*80}\n"
-                f"SENTENCE PROCESSING SUMMARY:\n"
-                f"  Total sentences: {total_sentences}\n"
-                f"  Successfully processed: {total_sentences - skipped_count}\n"
-                f"  Skipped (mismatch): {skipped_count}\n"
-                f"  Skip rate: {skip_percentage:.1f}%\n"
-                f"{'='*80}\n"
-            )
+        # Sentence processing statistics are now tracked in self.skipped_sentences
+        # No console logging - data accessible via self.skipped_sentences
 
         return results
