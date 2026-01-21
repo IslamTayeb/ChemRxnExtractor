@@ -159,7 +159,9 @@ def convert_examples_to_features(
                 label_ids.extend([label_map[label]] + [pad_token_label_id] * (len(word_tokens) - 1))
 
         if len(tokens) > max_seq_length - 2:
-            logger.warning("Sequence length exceed {} (cut).".format(max_seq_length))
+            original_text = " ".join(example.words)
+            preview = original_text[:512] + ("..." if len(original_text) > 512 else "")
+            logger.warning("Sequence length exceed {} (cut). Preview: {}".format(max_seq_length, preview))
             tokens = tokens[: (max_seq_length - 2)]
             label_ids = label_ids[: (max_seq_length - 2)]
 
