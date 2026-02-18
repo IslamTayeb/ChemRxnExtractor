@@ -153,7 +153,7 @@ class RxnExtractor(object):
 
         all_preds = []
         for batch in data_loader:
-            with torch.no_grad():
+            with torch.no_grad(), torch.cuda.amp.autocast(dtype=torch.float16, enabled=(self.device.type == 'cuda')):
                 for k, v in batch.items():
                     if isinstance(v, torch.Tensor):
                         batch[k] = v.to(self.device)
@@ -246,7 +246,7 @@ class RxnExtractor(object):
 
         all_preds = []
         for batch in data_loader:
-            with torch.no_grad():
+            with torch.no_grad(), torch.cuda.amp.autocast(dtype=torch.float16, enabled=(self.device.type == 'cuda')):
                 for k, v in batch.items():
                     if isinstance(v, torch.Tensor):
                         batch[k] = v.to(self.device)
@@ -267,6 +267,10 @@ class RxnExtractor(object):
             preds = [[self.role_labels[x] for x in seq] for seq in preds]
             all_preds += preds
 
+        # Convert predictions to deques for O(1) popleft (was O(n) pop(0))
+        from collections import deque
+        all_preds_deques = [deque(seq) for seq in all_preds]
+
         # align predictions with inputs
         example_id = 0
         results = []
@@ -280,7 +284,7 @@ class RxnExtractor(object):
                     if label in ["B-Prod", "I-Prod"]:
                         rxn_labels.append(label)
                     else:
-                        rxn_labels.append(all_preds[example_id].pop(0))
+                        rxn_labels.append(all_preds_deques[example_id].popleft())
                 rxn = {}
                 for role, ss, se in get_entities(rxn_labels):
                     if role == "Prod":

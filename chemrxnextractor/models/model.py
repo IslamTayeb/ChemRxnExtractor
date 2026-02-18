@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 import logging
 
+import numpy as np
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss
@@ -79,13 +80,8 @@ class BertForTagging(BertForTokenClassification):
 
     def decode(self, logits, mask):
         preds = torch.argmax(logits, dim=2).cpu().numpy()
-        batch_size, seq_len = preds.shape
-        preds_list = [[] for _ in range(batch_size)]
-        for i in range(batch_size):
-            for j in range(seq_len):
-                if mask[i, j]:
-                    preds_list[i].append(preds[i,j])
-        return preds_list
+        mask_np = mask.cpu().numpy().astype(bool)
+        return [preds[i][mask_np[i]].tolist() for i in range(preds.shape[0])]
 
 
 class BertCRFForTagging(BertForTokenClassification):
@@ -239,13 +235,8 @@ class BertForRoleLabeling(BertForTokenClassification):
 
     def decode(self, logits, mask):
         preds = torch.argmax(logits, dim=2).cpu().numpy()
-        batch_size, seq_len = preds.shape
-        preds_list = [[] for _ in range(batch_size)]
-        for i in range(batch_size):
-            for j in range(seq_len):
-                if mask[i, j]:
-                    preds_list[i].append(preds[i,j])
-        return preds_list
+        mask_np = mask.cpu().numpy().astype(bool)
+        return [preds[i][mask_np[i]].tolist() for i in range(preds.shape[0])]
 
 
 
