@@ -22,6 +22,8 @@ from torch.utils.data.sampler import SequentialSampler
 from transformers import AutoConfig, AutoTokenizer
 from transformers.data.data_collator import default_data_collator
 
+import numpy as np
+
 
 class RxnDataset(Dataset):
     def __init__(self, features):
@@ -163,7 +165,6 @@ class RxnExtractor(object):
                     token_type_ids=batch['token_type_ids']
                 )
                 logits = outputs[0]
-
             preds = self.prod_extractor.decode(
                 logits,
                 batch['decoder_mask'].bool()
@@ -259,7 +260,6 @@ class RxnExtractor(object):
                     token_type_ids=batch['token_type_ids']
                 )
                 logits = outputs[0]
-
             preds = self.role_extractor.decode(
                 logits,
                 batch['decoder_mask'].bool().to(self.device)
