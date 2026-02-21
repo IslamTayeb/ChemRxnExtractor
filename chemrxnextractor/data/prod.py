@@ -14,6 +14,17 @@ from .utils import InputExample
 
 logger = logging.getLogger(__name__)
 
+# Collect truncation events instead of logging warnings
+_truncation_events = []
+
+def get_truncation_events():
+    """Return collected truncation events."""
+    return list(_truncation_events)
+
+def clear_truncation_events():
+    """Clear collected truncation events."""
+    _truncation_events.clear()
+
 
 @dataclass
 class InputFeatures:
@@ -160,8 +171,12 @@ def convert_examples_to_features(
 
         if len(tokens) > max_seq_length - 2:
             original_text = " ".join(example.words)
-            preview = original_text[:512] + ("..." if len(original_text) > 512 else "")
-            logger.warning("Sequence length exceed {} (cut). Preview: {}".format(max_seq_length, preview))
+            _truncation_events.append({
+                'example_id': ex_index,
+                'token_len': len(tokens),
+                'max_seq_length': max_seq_length,
+                'preview': original_text[:200] + ("..." if len(original_text) > 200 else ""),
+            })
             tokens = tokens[: (max_seq_length - 2)]
             label_ids = label_ids[: (max_seq_length - 2)]
 

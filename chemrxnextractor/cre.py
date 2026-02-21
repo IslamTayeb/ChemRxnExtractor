@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+import time
 from seqeval.metrics.sequence_labeling import get_entities
 from collections import defaultdict
 from dataclasses import dataclass
@@ -123,7 +124,11 @@ class RxnExtractor(object):
     def get_products(self, sents):
         """
         """
+        t_total = time.time()
+        timing = {'featurize': 0, 'transfer': 0, 'forward': 0, 'decode': 0, 'num_sents': len(sents), 'num_batches': 0}
+
         # create dataset
+        t0 = time.time()
         examples = []
         for guid, sent in enumerate(sents):
             # assume sents are not tokenized,
@@ -152,52 +157,77 @@ class RxnExtractor(object):
             batch_size=self.batch_size,
             collate_fn=default_data_collator
         )
+        timing['featurize'] = time.time() - t0
 
         all_preds = []
         for batch in data_loader:
+            timing['num_batches'] += 1
+
+            t0 = time.time()
+            for k, v in batch.items():
+                if isinstance(v, torch.Tensor):
+                    batch[k] = v.to(self.device)
+            if self.device.type == 'cuda':
+                torch.cuda.synchronize()
+            timing['transfer'] += time.time() - t0
+
+            t0 = time.time()
             with torch.no_grad(), torch.cuda.amp.autocast(dtype=torch.float16, enabled=(self.device.type == 'cuda')):
-                for k, v in batch.items():
-                    if isinstance(v, torch.Tensor):
-                        batch[k] = v.to(self.device)
                 outputs = self.prod_extractor(
                     input_ids=batch['input_ids'],
                     attention_mask=batch['attention_mask'],
                     token_type_ids=batch['token_type_ids']
                 )
                 logits = outputs[0]
+            if self.device.type == 'cuda':
+                torch.cuda.synchronize()
+            timing['forward'] += time.time() - t0
+
+            t0 = time.time()
             preds = self.prod_extractor.decode(
                 logits,
                 batch['decoder_mask'].bool()
             )
             preds = [[self.prod_labels[x] for x in seq] for seq in preds]
             all_preds += preds
+            timing['decode'] += time.time() - t0
+
+        timing['total'] = time.time() - t_total
+        self._last_prod_timing = timing
 
         tokenized_sents = [ex.words for ex in examples]
         return tokenized_sents, all_preds
 
+    def get_last_prod_timing(self):
+        """Get timing data from the last get_products call."""
+        return getattr(self, '_last_prod_timing', None)
+
     def get_reactions(self, sents, products=None):
         """
         """
+        t_total = time.time()
+        timing = {'prod_phase': 0, 'featurize': 0, 'transfer': 0, 'forward': 0, 'decode': 0,
+                  'postprocess': 0, 'num_sents': len(sents), 'num_batches': 0, 'skipped': 0}
+
         # Clear skipped sentences from previous extraction
         self.skipped_sentences = []
 
+        t0 = time.time()
         if products is None:
             tokenized_sents, products = self.get_products(sents)
+        timing['prod_phase'] = time.time() - t0
 
         assert len(products) == len(tokenized_sents)
 
-        # Track skipped sentences for statistics
-        total_sentences = len(tokenized_sents)
-        skipped_count = 0
-
         # create dataset
         # for each sent, create #{prod} instances
+        t0 = time.time()
         examples = []
         num_rxns_per_sent = []
         for guid, (sent, prod_labels) in enumerate(zip(tokenized_sents, products)):
             # Handle tokenization mismatch (caused by sequence truncation at max_seq_length)
             if len(sent) != len(prod_labels):
-                skipped_count += 1  # Increment skip counter
+                timing['skipped'] += 1
 
                 # Get original sentence for debugging
                 original_text = sents[guid] if guid < len(sents) else " ".join(sent)
@@ -244,13 +274,22 @@ class RxnExtractor(object):
             batch_size=self.batch_size,
             collate_fn=default_data_collator
         )
+        timing['featurize'] = time.time() - t0
 
         all_preds = []
         for batch in data_loader:
+            timing['num_batches'] += 1
+
+            t0 = time.time()
+            for k, v in batch.items():
+                if isinstance(v, torch.Tensor):
+                    batch[k] = v.to(self.device)
+            if self.device.type == 'cuda':
+                torch.cuda.synchronize()
+            timing['transfer'] += time.time() - t0
+
+            t0 = time.time()
             with torch.no_grad(), torch.cuda.amp.autocast(dtype=torch.float16, enabled=(self.device.type == 'cuda')):
-                for k, v in batch.items():
-                    if isinstance(v, torch.Tensor):
-                        batch[k] = v.to(self.device)
                 outputs = self.role_extractor(
                     input_ids=batch['input_ids'],
                     attention_mask=batch['attention_mask'],
@@ -260,18 +299,25 @@ class RxnExtractor(object):
                     token_type_ids=batch['token_type_ids']
                 )
                 logits = outputs[0]
+            if self.device.type == 'cuda':
+                torch.cuda.synchronize()
+            timing['forward'] += time.time() - t0
+
+            t0 = time.time()
             preds = self.role_extractor.decode(
                 logits,
                 batch['decoder_mask'].bool().to(self.device)
             )
             preds = [[self.role_labels[x] for x in seq] for seq in preds]
             all_preds += preds
+            timing['decode'] += time.time() - t0
 
         # Convert predictions to deques for O(1) popleft (was O(n) pop(0))
         from collections import deque
         all_preds_deques = [deque(seq) for seq in all_preds]
 
         # align predictions with inputs
+        t0 = time.time()
         example_id = 0
         results = []
         for guid, sent in enumerate(tokenized_sents):
@@ -297,8 +343,25 @@ class RxnExtractor(object):
                 example_id += 1
 
             results.append(rxns)
+        timing['postprocess'] = time.time() - t0
 
-        # Sentence processing statistics are now tracked in self.skipped_sentences
-        # No console logging - data accessible via self.skipped_sentences
+        timing['total'] = time.time() - t_total
+        self._last_role_timing = timing
 
         return results
+
+    def get_last_role_timing(self):
+        """Get timing data from the last get_reactions call (role labeling phase)."""
+        return getattr(self, '_last_role_timing', None)
+
+    @staticmethod
+    def get_truncation_events():
+        """Get sequence truncation events from prod featurization."""
+        from chemrxnextractor.data.prod import get_truncation_events
+        return get_truncation_events()
+
+    @staticmethod
+    def clear_truncation_events():
+        """Clear collected truncation events."""
+        from chemrxnextractor.data.prod import clear_truncation_events
+        clear_truncation_events()
