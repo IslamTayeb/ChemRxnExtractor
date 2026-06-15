@@ -330,7 +330,10 @@ class RxnExtractor(object):
                     if label in ["B-Prod", "I-Prod"]:
                         rxn_labels.append(label)
                     else:
-                        rxn_labels.append(all_preds_deques[example_id].popleft())
+                        if all_preds_deques[example_id]:
+                            rxn_labels.append(all_preds_deques[example_id].popleft())
+                        else:
+                            rxn_labels.append("O")
                 rxn = {}
                 for role, ss, se in get_entities(rxn_labels):
                     if role == "Prod":

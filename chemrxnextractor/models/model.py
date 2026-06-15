@@ -55,13 +55,15 @@ class BertForTagging(BertForTokenClassification):
 
         if self.use_cls:
             batch_size, seq_length, hidden_dim = sequence_output.shape
-            extended_cls_h = outputs[1].unsqueeze(1).expand(batch_size, seq_length, hidden_dim)
+            # Use CLS token hidden state directly (BertForTokenClassification has no pooler)
+            cls_h = sequence_output[:, 0]
+            extended_cls_h = cls_h.unsqueeze(1).expand(batch_size, seq_length, hidden_dim)
             sequence_output = torch.cat([sequence_output, extended_cls_h], 2)
 
         sequence_output = self.dropout(sequence_output)
         logits = self.classifier(sequence_output)
 
-        outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
+        outputs = (logits,)
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             # Only keep active parts of the loss
@@ -119,14 +121,16 @@ class BertCRFForTagging(BertForTokenClassification):
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states
+            output_hidden_states=output_hidden_states,
         )
 
         sequence_output = outputs[0]
 
         if self.use_cls:
             batch_size, seq_length, hidden_dim = sequence_output.shape
-            extended_cls_h = outputs[1].unsqueeze(1).expand(batch_size, seq_length, hidden_dim)
+            # Use CLS token hidden state directly (BertForTokenClassification has no pooler)
+            cls_h = sequence_output[:, 0]
+            extended_cls_h = cls_h.unsqueeze(1).expand(batch_size, seq_length, hidden_dim)
             sequence_output = torch.cat([sequence_output, extended_cls_h], 2)
 
         sequence_output = self.dropout(sequence_output)
@@ -135,7 +139,7 @@ class BertCRFForTagging(BertForTokenClassification):
         # emission = F.log_softmax(logits, dim=2) # necessary?
 
         loss = None
-        outputs = (logits,) + outputs[2:]
+        outputs = (logits,)
         if labels is not None:
             decoder_mask = decoder_mask.bool()
             loss = -self.crf(logits, labels, mask=decoder_mask)
@@ -191,7 +195,7 @@ class BertForRoleLabeling(BertForTokenClassification):
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states
+            output_hidden_states=output_hidden_states,
         )
 
         sequence_output = outputs[0]
@@ -209,14 +213,16 @@ class BertForRoleLabeling(BertForTokenClassification):
         # sequence_output = self.activation(self.dense(sequence_output))
         extended_sequence_output = torch.cat([sequence_output, extended_prod_h], 2)
         if self.use_cls:
-            extended_cls_h = outputs[1].unsqueeze(1).expand(batch_size, seq_length, hidden_dim)
+            # Use CLS token hidden state directly (BertForTokenClassification has no pooler)
+            cls_h = sequence_output[:, 0]
+            extended_cls_h = cls_h.unsqueeze(1).expand(batch_size, seq_length, hidden_dim)
             extended_sequence_output = torch.cat([extended_sequence_output, extended_cls_h], 2)
         # extended_sequence_output = sequence_output
         extended_sequence_output = self.dropout(extended_sequence_output)
         logits = self.classifier(extended_sequence_output)
 
         loss = None
-        outputs = (logits,) + outputs[2:]
+        outputs = (logits,)
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             if attention_mask is not None: # for possible speed up
@@ -288,12 +294,15 @@ class BertCRFForRoleLabeling(BertForTokenClassification):
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states
+            output_hidden_states=output_hidden_states,
         )
 
         # outputs[0]: hidden states of all time steps
         # outputs[1]: hidden state of [CLS]
         sequence_output = outputs[0]
+
+        # Save CLS token before sequence_output gets modified by concatenation
+        cls_h = sequence_output[:, 0] if self.use_cls else None
 
         if self.prod_pool_type == "span":
             prod_h = self.pooler.pool_span(sequence_output, prod_mask)
@@ -307,20 +316,15 @@ class BertCRFForRoleLabeling(BertForTokenClassification):
         # concatenate sequence_output with Product token output
         sequence_output = torch.cat([sequence_output, extended_prod_h], 2)
         if self.use_cls:
-            # Safe access to pooler output (may not exist in some model configs)
-            if len(outputs) > 1 and outputs[1] is not None:
-                extended_cls_h = outputs[1].unsqueeze(1).expand(batch_size, seq_length, hidden_dim)
-            else:
-                # Fallback: use CLS token from ORIGINAL outputs[0] (before concatenation)
-                cls_h = outputs[0][:, 0, :]  # Extract from original sequence output
-                extended_cls_h = cls_h.unsqueeze(1).expand(batch_size, seq_length, hidden_dim)
+            # Use CLS token hidden state directly (BertForTokenClassification has no pooler)
+            extended_cls_h = cls_h.unsqueeze(1).expand(batch_size, seq_length, hidden_dim)
             sequence_output = torch.cat([sequence_output, extended_cls_h], 2)
         sequence_output = self.dropout(sequence_output)
         logits = self.classifier(sequence_output)
 
         assert logits.shape[2] == self.num_labels
         loss = None
-        outputs = (logits,) + outputs[2:]
+        outputs = (logits,)
         if labels is not None:
             decoder_mask = decoder_mask.bool()
             loss = -self.crf(logits, labels, mask=decoder_mask)
